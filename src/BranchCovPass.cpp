@@ -185,7 +185,7 @@ struct BranchCovPass : public PassInfoMixin<BranchCovPass> {
 
     bool _instrumentOnSwitch(SwitchInst* InstSwitch) {
 
-        errs() << "Instrumenting Switch\n";
+        //errs() << "Instrumenting Switch\n";
 
         int LineNo = InstSwitch->getDebugLoc().getLine();
         int Index {-1};
