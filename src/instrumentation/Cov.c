@@ -8,6 +8,8 @@ struct _record_ {
   int true_count;
   int false_count;
   int is_switch;
+  int true_dist;
+  int false_dist;
 };
 
 FILE *fp;
@@ -26,16 +28,16 @@ extern void _final_() {
     record = *(records + i);
 
     if (record->is_switch) {
-      fprintf(fp, "%d.%d -> %d\n",
-          record->line, record->index, record->true_count);
+      fprintf(fp, "%d.%d -> %d, %d\n",
+          record->line, record->index, record->true_count, record->true_dist);
       total++;
       if (record->true_count > 0) {
         covered++;
       }
     } else {
-      fprintf(fp, "%d.%d -> %d, %d\n",
+      fprintf(fp, "%d.%d -> %d, %d, %d, %d\n",
               record->line, record->index,
-              record->true_count, record->false_count);
+              record->true_count, record->true_dist, record->false_count, record->false_dist);
       total += 2;
       if (record->true_count > 0) {
         covered++;
@@ -71,6 +73,8 @@ extern void _init_(int count, int *lines, int *indices, int *switches) {
     record->true_count = 0;
     record->false_count = 0;
     record->is_switch = *(switches + i);
+    record->true_dist = 8192;
+    record->false_dist = 8192;
     *(records + i) = record;
   }
 
@@ -82,11 +86,12 @@ extern void _init_(int count, int *lines, int *indices, int *switches) {
         break;
       }
       record = *(records + i);
-      assigned = sscanf(buf, "%d.%d -> %d, %d",
+      assigned = sscanf(buf, "%d.%d -> %d, %d, %d, %d",
           &record->line, &record->index,
-          &record->true_count, &record->false_count);
-      if (assigned < 3) {
+          &record->true_count, &record->true_dist, &record->false_count, &record->false_dist);
+      if (assigned < 4) {
         record->false_count = 0;
+        record->false_dist = 8192;
       }
       i++;
     }
@@ -96,12 +101,23 @@ extern void _init_(int count, int *lines, int *indices, int *switches) {
   atexit(_final_);
 }
 
-extern void _probe_(int index, int check) {
+extern void _probe_(int index, int check, int dist) {
   struct _record_ *record;
   record = *(records + index);
+  if (dist < 0) {
+    dist = -dist;
+  }
   if (check) {
     record->true_count++;
+    record->true_dist = 0;
+    if (!record->is_switch && record->false_dist > dist) {
+      record->false_dist = dist;
+    }
   } else {
     record->false_count++;
+    record->false_dist = 0;
+    if (!record->is_switch && record->true_dist > dist) {
+      record->true_dist = dist;
+    }
   }
 }

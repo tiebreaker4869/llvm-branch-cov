@@ -4,6 +4,7 @@
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Instructions.h"
 
 #include <map>
 #include <vector>
@@ -64,7 +65,7 @@ struct BranchCovPass : public PassInfoMixin<BranchCovPass> {
         PInit = M.getOrInsertFunction("_init_", InitFTy);
 
         // add _probe_ declaration
-        Type* ProbeArgs[2] = {IntTy, IntTy};
+        Type* ProbeArgs[3] = {IntTy, IntTy, IntTy};
         FunctionType* ProbeFTy = FunctionType::get(VoidTy, ProbeArgs, false);
         PProbe = M.getOrInsertFunction("_probe_", ProbeFTy);
 
@@ -144,6 +145,17 @@ struct BranchCovPass : public PassInfoMixin<BranchCovPass> {
         return true;
     }
 
+    Value* _getDist(Value* Cond, IRBuilder<> &Builder) {
+        auto* Inst = dyn_cast<ICmpInst>(Cond);
+        if (Inst == nullptr) {
+            return ConstantInt::get(IntTy, 8192);
+        }
+        auto* LHS = Inst->getOperand(0);
+        auto* RHS = Inst->getOperand(1);
+        auto* Sub = Builder.CreateSub(LHS, RHS);
+        return Sub;
+    }
+
     bool _instrumentOnBr(BranchInst* InstBr) {
         //errs() << "Instrumenting Branch\n";
         // 编译一定要记得开 -g 选项，不然这里就会 crash
@@ -171,8 +183,9 @@ struct BranchCovPass : public PassInfoMixin<BranchCovPass> {
         //errs() << "Creating cast inst\n";
         Value* Cond = InstBr->getCondition();
         Value* CondInt = Builder.CreateZExt(Cond, IntTy);
+        Value* Dist = _getDist(Cond, Builder);
         // create a call to probe
-        Value* ProbeArgs[2] = {ConstantInt::get(IntTy, Lines.size() - 1), CondInt};
+        Value* ProbeArgs[3] = {ConstantInt::get(IntTy, Lines.size() - 1), CondInt, Dist};
         
         //errs() << "ProbeArgs prepared\n";
         
@@ -213,7 +226,7 @@ struct BranchCovPass : public PassInfoMixin<BranchCovPass> {
 
             // create probe call before branch
             IRBuilder<> Builder(BB->getFirstNonPHI());
-            Value* ProbeArgs[2] = {ConstantInt::get(IntTy, Lines.size() - 1), ConstantInt::get(IntTy, 1)};
+            Value* ProbeArgs[3] = {ConstantInt::get(IntTy, Lines.size() - 1), ConstantInt::get(IntTy, 1), ConstantInt::get(IntTy, 1)};
             Builder.CreateCall(PProbe, ProbeArgs);
 
             Index ++;

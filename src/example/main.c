@@ -31,13 +31,5 @@ int main() {
 
     printf("c = %d\n", c);
 
-    c = add(a + 2, b - 1);
-
-    printf("c = %d\n", c);
-
-    c = add(1, b);
-
-    c = add(5, b);
-
     return 0;
 }
