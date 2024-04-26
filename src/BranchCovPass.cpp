@@ -5,37 +5,251 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/IR/IRBuilder.h"
 
+#include <map>
+#include <vector>
+
 using namespace llvm;
 
 namespace {
 
 struct BranchCovPass : public PassInfoMixin<BranchCovPass> {
-    PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM) {
-        for (auto &F : M) {
-            // declare function
-            LLVMContext& ctx = F.getContext();
-            FunctionCallee logFunc = F.getParent()->getOrInsertFunction(
-                "logop", Type::getVoidTy(ctx), Type::getInt32Ty(ctx)
-            );
-            for (auto& B: F) {
-                for (auto& I: B) {
-                    if (auto* instr = dyn_cast<BinaryOperator>(&I)) {
-                        // Insert at the point where the instr appears(before)
-                        IRBuilder<> builder(instr);
 
-                        builder.SetInsertPoint(&B, ++builder.GetInsertPoint());
+    // pointers to some primitive types
+    Type* IntTy;
+    Type* IntPtrTy;
+    Type* VoidTy;
 
-                        // Insert Function Call
-                        Value* args[] = {instr};
-                        builder.CreateCall(logFunc, args);
+    // hold constant address of extern function
+    // points to the function instance called _init_
+    FunctionCallee PInit;
+    // points to the function instance called _probe_
+    FunctionCallee PProbe;
 
-                        // we modified the code
-                        return PreservedAnalyses::none();
-                    }
+    // utility containers
+    // hold the mapping from linenumber to branch index
+    std::map<int, int> LineNoToIndex;
+
+    // hold lines
+    std::vector<int> Lines;
+
+    // hold indices
+    std::vector<int> Indices;
+
+    // hold whether it is a switch or not
+    std::vector<bool> IsSwitch;
+
+    // do initialization, 
+    // returns whether any transformatin occurs during initialization
+    bool _initialize(Module &M) {
+        // ensure the functions to be instrumented is not defined before the
+        // instrumentation
+        if (M.getFunction("_init_") != nullptr) {
+            errs() << "Function _init_ is already defined\n";
+            exit(1);
+        }
+
+        if (M.getFunction("_probe_") != nullptr) {
+            errs() << "Function _probe_ is already defined\n";
+            exit(1);
+        }
+
+        // store the ptr to types
+        IntTy = Type::getInt32Ty(M.getContext());
+        IntPtrTy = Type::getInt32PtrTy(M.getContext());
+        VoidTy = Type::getVoidTy(M.getContext());
+
+        // add _init_ declaration
+        Type* InitArgs[4] = {IntTy, IntPtrTy, IntPtrTy, IntPtrTy};
+        FunctionType* InitFTy = FunctionType::get(VoidTy, InitArgs, false);
+        PInit = M.getOrInsertFunction("_init_", InitFTy);
+
+        // add _probe_ declaration
+        Type* ProbeArgs[2] = {IntTy, IntTy};
+        FunctionType* ProbeFTy = FunctionType::get(VoidTy, ProbeArgs, false);
+        PProbe = M.getOrInsertFunction("_probe_", ProbeFTy);
+
+        return false;
+    }
+
+    bool _finalize(Module &M) {
+        // no need to instrument _init_ in a module without main function
+        Function* MainFunc = M.getFunction("main");
+        if (MainFunc == nullptr) {
+            errs() << "No main function found\n";
+            exit(1);
+        }
+
+        auto InsertPt = MainFunc->getEntryBlock().getFirstInsertionPt();
+        IRBuilder<> Builder(&*InsertPt);
+
+        std::vector<Value*> InitArgs {};
+
+        InitArgs.push_back(ConstantInt::get(IntTy, Lines.size()));
+
+        std::vector<Constant*> LinesVec {};
+
+        for (auto Line: Lines) {
+            LinesVec.push_back(ConstantInt::get(IntTy, Line));
+        }
+
+        Constant* LinesArr = ConstantArray::get(ArrayType::get(IntTy, Lines.size()), LinesVec);
+
+        GlobalVariable* LinesGV = new GlobalVariable(
+            M,
+            LinesArr->getType(),
+            false,
+            GlobalValue::PrivateLinkage,
+            LinesArr
+        );
+        InitArgs.push_back(Builder.CreatePointerCast(LinesGV, IntPtrTy));
+
+        std::vector<Constant*> IndicesVec {};
+
+        for (auto Index: Indices) {
+            IndicesVec.push_back(ConstantInt::get(IntTy, Index));
+        }
+
+        Constant* IndicesArr = ConstantArray::get(ArrayType::get(IntTy, Indices.size()), IndicesVec);
+
+        GlobalVariable* IndicesGV = new GlobalVariable(
+            M,
+            IndicesArr->getType(),
+            false,
+            GlobalValue::PrivateLinkage,
+            IndicesArr
+        );
+
+        InitArgs.push_back(Builder.CreatePointerCast(IndicesGV, IntPtrTy));
+
+        std::vector<Constant*> IsSwitchVec {};
+
+        for (auto Switch: IsSwitch) {
+            IsSwitchVec.push_back(ConstantInt::get(IntTy, Switch));
+        }
+
+        Constant* IsSwitchArr = ConstantArray::get(ArrayType::get(IntTy, IsSwitch.size()), IsSwitchVec);
+
+        GlobalVariable* IsSwitchGV = new GlobalVariable(
+            M,
+            IsSwitchArr->getType(),
+            false,
+            GlobalValue::PrivateLinkage,
+            IsSwitchArr
+        );
+
+        InitArgs.push_back(Builder.CreatePointerCast(IsSwitchGV, IntPtrTy));
+
+        Builder.CreateCall(PInit, InitArgs);
+
+        return true;
+    }
+
+    bool _instrumentOnBr(BranchInst* InstBr) {
+        int LineNo = InstBr->getDebugLoc().getLine();
+        int Index {-1};
+        auto It = LineNoToIndex.find(LineNo);
+        
+        if (It != LineNoToIndex.end()) {
+            Index = It->second + 1;
+        } else {
+            Index = 0;
+        }
+
+        // Store Metadata about the branch
+        Lines.push_back(LineNo);
+        Indices.push_back(Index);
+        IsSwitch.push_back(false);
+
+        LineNoToIndex[LineNo] = Index;
+
+        // Create Probe Call before branch
+        IRBuilder<> Builder(InstBr);
+        // create a cast inst to cast the condition to int
+        Value* Cond = InstBr->getCondition();
+        Value* CondInt = Builder.CreateZExt(Cond, IntTy);
+        // create a call to probe
+        Value* ProbeArgs[2] = {ConstantInt::get(IntTy, Lines.size() - 1), CondInt};
+        Builder.CreateCall(PProbe, ProbeArgs);
+
+        return true;
+    }
+
+    bool _instrumentOnSwitch(SwitchInst* InstSwitch) {
+
+        int LineNo = InstSwitch->getDebugLoc().getLine();
+        int Index {-1};
+
+        auto It = LineNoToIndex.find(LineNo);
+        if (It != LineNoToIndex.end()) {
+            Index = It->second + 1;
+        } else {
+            Index = 0;
+        }
+
+        // Store Metadata about the branch
+        for (int i = 1; i <= InstSwitch->getNumSuccessors(); i++) {
+            Lines.push_back(LineNo);
+            Indices.push_back(Index);
+            IsSwitch.push_back(true);
+
+            BasicBlock* BB;
+
+            if (i == InstSwitch->getNumSuccessors()) {
+                BB = InstSwitch->getDefaultDest();
+            } else {
+                BB = InstSwitch->getSuccessor(i - 1);
+            }
+
+            // create probe call before branch
+            IRBuilder<> Builder(BB->getFirstNonPHI());
+            Value* ProbeArgs[2] = {ConstantInt::get(IntTy, Lines.size() - 1), ConstantInt::get(IntTy, 1)};
+            Builder.CreateCall(PProbe, ProbeArgs);
+
+            Index ++;
+        }
+
+        LineNoToIndex[LineNo] = Index - 1;
+
+        return false;
+    }
+
+    bool _instrumentOnBB(BasicBlock &BB) {
+        
+        bool Changed = false;
+        for (auto &I: BB) {
+            if (I.getOpcode() == Instruction::Br) {
+                auto InstBr = cast<BranchInst>(&I);
+                if (InstBr->isConditional()) {
+                    Changed |= _instrumentOnBr(InstBr);
                 }
+            } else if (I.getOpcode() == Instruction::Switch) {
+                auto InstSwitch = cast<SwitchInst>(&I);
+                Changed |= _instrumentOnSwitch(InstSwitch);
             }
         }
-        return PreservedAnalyses::all();
+
+        return Changed;
+    }
+
+    bool _instrument(Module &M, ModuleAnalysisManager &AM) {
+        bool Changed = false;
+        for (auto& F: M) {
+            for (auto& BB: F) {
+                Changed |= _instrumentOnBB(BB);
+            }
+        }
+
+        return Changed;
+    }
+
+    PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM) {
+        bool Changed = _initialize(M);
+
+        Changed |= _instrument(M, AM);
+
+        Changed |= _finalize(M);
+
+        return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
     };
 };
 
