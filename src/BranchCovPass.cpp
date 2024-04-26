@@ -145,7 +145,10 @@ struct BranchCovPass : public PassInfoMixin<BranchCovPass> {
     }
 
     bool _instrumentOnBr(BranchInst* InstBr) {
+        //errs() << "Instrumenting Branch\n";
+        // 编译一定要记得开 -g 选项，不然这里就会 crash
         int LineNo = InstBr->getDebugLoc().getLine();
+        //errs() << "LineNo: " << LineNo << "\n";
         int Index {-1};
         auto It = LineNoToIndex.find(LineNo);
         
@@ -165,16 +168,24 @@ struct BranchCovPass : public PassInfoMixin<BranchCovPass> {
         // Create Probe Call before branch
         IRBuilder<> Builder(InstBr);
         // create a cast inst to cast the condition to int
+        //errs() << "Creating cast inst\n";
         Value* Cond = InstBr->getCondition();
         Value* CondInt = Builder.CreateZExt(Cond, IntTy);
         // create a call to probe
         Value* ProbeArgs[2] = {ConstantInt::get(IntTy, Lines.size() - 1), CondInt};
+        
+        //errs() << "ProbeArgs prepared\n";
+        
         Builder.CreateCall(PProbe, ProbeArgs);
+
+        //errs() << "Instrumented Branch, line: " << LineNo << ", index: " << Index << "\n";
 
         return true;
     }
 
     bool _instrumentOnSwitch(SwitchInst* InstSwitch) {
+
+        errs() << "Instrumenting Switch\n";
 
         int LineNo = InstSwitch->getDebugLoc().getLine();
         int Index {-1};
