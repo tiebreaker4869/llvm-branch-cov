@@ -12,8 +12,8 @@ Follow these steps to use this tool:
 ## View Execution Result
 The branch coverage data will be saved in a file named coverage. The data format is as follows:
 
-For conditional branches: lineNo.predicateIndex -> true_count, false_count
+For conditional branches: lineNo.predicateIndex -> true_count, true_dist,  false_count, false_dist
 
-For switch statements: lineNo.predicateIndex -> true_count
+For switch statements: lineNo.predicateIndex -> true_count, true_dist
 
 Please note that the predicateIndex is not globally unique, but it is unique within the same line number.
