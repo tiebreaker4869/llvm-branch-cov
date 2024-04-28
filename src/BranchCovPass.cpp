@@ -267,7 +267,10 @@ struct BranchCovPass : public PassInfoMixin<BranchCovPass> {
             F.getName().equals("_init_") || 
             F.getName().equals("_probe_") || 
             F.getName().contains("TestCase") || 
-            F.getName().contains("Suite")) {
+            F.getName().contains("Suite") || 
+            F.getName().contains("testing") ||
+            F.getName().contains("_cxx") ||
+            F.getName().contains("RUN_ALL_TESTS")){
                 //errs() << "skip function " << F.getName() << "\n"; 
                 //errs() << "corresponding to " << Subprogram->getName() << "\n";
                 continue;

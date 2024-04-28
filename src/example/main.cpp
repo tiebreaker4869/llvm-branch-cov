@@ -35,5 +35,6 @@ TEST(TestCase, Test_1) {
 int main() {
     ::testing::InitGoogleTest();
     return RUN_ALL_TESTS();
+    printf("done!");
     return 0;
 }
