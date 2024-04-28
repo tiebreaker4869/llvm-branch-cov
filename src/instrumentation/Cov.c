@@ -103,6 +103,9 @@ extern void _init_(int count, int *lines, int *indices, int *switches) {
 
 extern void _probe_(int index, int check, int dist) {
   struct _record_ *record;
+  if (records == NULL) {
+    return;
+  }
   record = *(records + index);
   if (dist < 0) {
     dist = -dist;
