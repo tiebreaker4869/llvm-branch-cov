@@ -260,7 +260,7 @@ struct BranchCovPass : public PassInfoMixin<BranchCovPass> {
         for (auto& F: M) {
             auto Subprogram = F.getSubprogram();
             if (Subprogram == nullptr || Subprogram->getName().empty()) {
-                errs() << "skip function " << F.getName() << "\n";
+                //errs() << "skip function " << F.getName() << "\n";
                 continue;
             }
             if (F.getName().equals("main") || 
@@ -268,12 +268,12 @@ struct BranchCovPass : public PassInfoMixin<BranchCovPass> {
             F.getName().equals("_probe_") || 
             F.getName().contains("TestCase") || 
             F.getName().contains("Suite")) {
-                errs() << "skip function " << F.getName() << "\n"; 
-                errs() << "corresponding to " << Subprogram->getName() << "\n";
+                //errs() << "skip function " << F.getName() << "\n"; 
+                //errs() << "corresponding to " << Subprogram->getName() << "\n";
                 continue;
             }
-            errs() << "instrument function " << F.getName() << "\n";
-            errs() << "corresponding to " << Subprogram->getName() << "\n";
+            //errs() << "instrument function " << F.getName() << "\n";
+            //errs() << "corresponding to " << Subprogram->getName() << "\n";
             for (auto& BB: F) {
                 Changed |= _instrumentOnBB(BB);
             }
